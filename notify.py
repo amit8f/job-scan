@@ -31,6 +31,32 @@ def pick_cv(title):
 NOISE = re.compile(r'^\((hidden on HireMe|see posting|telegram[^)]*)\)$', re.I)
 
 
+# Amit skips roles that ask for a GPA of 85 or more. Text comes from the posting itself when the scan carried it
+# (HireMe, Goozali, Workday) and from the public LinkedIn page otherwise. No text means no filtering.
+GPA_A = re.compile(r'(?:gpa|grade average|average grade|average score|weighted average|ממוצע|ציון)[^.\n]{0,40}?(\d{2,3})', re.I)
+GPA_B = re.compile(r'(\d{2,3})\+?\s*(?:and above|or above|or higher|ומעלה|ויותר)?[^.\n]{0,25}?(?:gpa|average|ממוצע)', re.I)
+
+
+def gpa_floor(text):
+    vals = [int(v) for rx in (GPA_A, GPA_B) for v in rx.findall(text or '') if 60 <= int(v) <= 100]
+    return max(vals) if vals else None
+
+
+def posting_text(j):
+    if j.get('desc'):
+        return str(j['desc'])
+    url = j.get('url') or ''
+    if 'linkedin.com/jobs/view' in url:
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scan'))
+            import lidesc, time
+            time.sleep(1.2)
+            return lidesc.desc(url).get('desc', '') or ''
+        except Exception as e:
+            print('description fetch failed', e, file=sys.stderr)
+    return ''
+
+
 def clean(s, n):
     s = ' '.join(html.unescape(str(s or '')).split())
     return html.escape(s[:n])
@@ -47,14 +73,25 @@ def line(j):
     if loc:
         head += f' ({loc})'
     cv = pick_cv(str(j.get('title') or ''))
-    return f'{head}\nCV: {cv}\n{html.escape(url)}'
+    note = f' (GPA {j["gpa_note"]} mentioned)' if j.get('gpa_note') else ''
+    return f'{head}\nCV: {cv}{note}\n{html.escape(url)}'
 
 
 path = sys.argv[1]
 cands = json.load(open(path)) if os.path.exists(path) else []
 total = len(cands)
 cands = [j for j in cands if TECH.search(str(j.get('title') or ''))]
-print(f'{total} new, {len(cands)} look technical')
+kept = []
+for j in cands:
+    g = gpa_floor(posting_text(j))
+    if g is not None and g >= 85:
+        print('dropped, GPA', g, j.get('company'), j.get('title'))
+        continue
+    if g is not None and g >= 80:
+        j['gpa_note'] = g
+    kept.append(j)
+cands = kept
+print(f'{total} new, {len(cands)} look technical and pass the GPA check')
 if not cands:
     print('nothing to send')
     sys.exit(0)
