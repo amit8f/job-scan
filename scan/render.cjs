@@ -5,7 +5,7 @@ const T=JSON.parse(fs.readFileSync(process.argv[2])); const OUT=process.argv[3];
 const ATS=/comeet\.co|greenhouse\.io|lever\.co|ashbyhq|smartrecruiters|workable|breezy\.hr|bamboohr|recruitee|myworkdayjobs|teamtailor|hibob|jobvite|icims|successfactors|niloosoft|hunterhrms|adamtotal|taleo|eightfold|phenom|avature|oracle.*hcm|polymer|pinpoint|personio|freshteam|jazzhr|rippling/i;
 const STU=/[^\n]{0,80}(\bstudent\b|\bintern\b|internship|סטודנט)[^\n]{0,80}/ig;
 (async()=>{
-  const b=await chromium.launch({proxy:{server:process.env.HTTPS_PROXY}});
+  const b=await chromium.launch(process.env.HTTPS_PROXY?{proxy:{server:process.env.HTTPS_PROXY}}:{});
   const res=[]; let i=0;
   async function worker(){
     while(i<T.length){

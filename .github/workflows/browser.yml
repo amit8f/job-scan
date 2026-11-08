@@ -1,0 +1,75 @@
+name: Browser pass
+
+on:
+  schedule:
+    # once a day at 11:17 UTC, which is 13:17 in Israel in winter and 14:17 in summer
+    - cron: '17 11 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: job-scan-browser
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: pip install requests
+
+      - name: Install a browser
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Visit company careers pages
+        run: |
+          W="$RUNNER_TEMP/work"; mkdir -p "$W"; cd "$W"
+          git clone -q --depth 1 https://github.com/mluggy/techmap techmap
+          D="$GITHUB_WORKSPACE/scan" python3 - <<'P'
+          import json,glob,os
+          out=[]
+          for f in glob.glob('techmap/companies/*.json'):
+            d=json.load(open(f))
+            if d.get('isActive'): out.append({k:d.get(k) for k in ('name','size','careersUrl','comeetId','greenhouseId','leverId','breezyId','linkedinId','isMultinational')})
+          X=os.environ['D']+'/extra_companies.json'
+          if os.path.exists(X): out+=[{k:d.get(k) for k in ('name','size','careersUrl','comeetId','greenhouseId','leverId','breezyId','linkedinId','isMultinational')} for d in json.load(open(X))]
+          json.dump(out,open('companies.json','w'))
+          P
+          python3 "$GITHUB_WORKSPACE/scan/sites.py" "$W" 2>sites.log
+          python3 "$GITHUB_WORKSPACE/scan/prepare_render.py" "$W"
+
+      - name: Render the pages that need a browser
+        run: |
+          W="$RUNNER_TEMP/work"; cd "$W"
+          NODE_PATH="$GITHUB_WORKSPACE/node_modules" node "$GITHUB_WORKSPACE/scan/render.cjs" render_targets.json rendered.json 2>render.log
+          tail -3 render.log
+
+      - name: Send new mentions to Telegram
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scan/browser_notify.py "$RUNNER_TEMP/work/rendered.json" scan/rendered_seen.json
+
+      # Saved only after Telegram accepted the message
+      - name: Remember what we have seen
+        run: |
+          git config user.name "job-scan-bot"
+          git config user.email "job-scan-bot@users.noreply.github.com"
+          git add scan/rendered_seen.json
+          git diff --cached --quiet || git commit -m "Update browser pass seen mentions"
+          git pull --rebase origin main
+          git push
