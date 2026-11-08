@@ -12,6 +12,22 @@ TECH = re.compile(
     r'\bAI\b|machine|\bML\b|vision|python|C\+\+|devops|cloud|R&D|firmware|analyst|quant|'
     r'תוכנה|פיתוח|אלגורית|סייבר|דאטה|מפתח|ראייה|ממוחשבת|למידת|בינה|מחקר|אבטחת',
     re.I)
+# Which of the five CVs to send, picked from the title. First match wins, backend is the default.
+CV_RULES = [
+    ('security', re.compile(r'cyber|security|infosec|סייבר|אבטחת', re.I)),
+    ('cloud', re.compile(r'devops|cloud|infrastructure|\bSRE\b|platform', re.I)),
+    ('systems', re.compile(r'embedded|firmware|C\+\+|low.?level|kernel|GPU|FPGA|driver|simulation|systems|real.?time|סימולצי|משובצ', re.I)),
+    ('ai_data', re.compile(r'\bAI\b|machine|\bML\b|learning|data|vision|algorithm|research|quant|analyst|NLP|אלגורית|דאטה|למידת|בינה|ראייה|מחקר', re.I)),
+]
+
+
+def pick_cv(title):
+    for name, rx in CV_RULES:
+        if rx.search(title or ''):
+            return name
+    return 'backend'
+
+
 NOISE = re.compile(r'^\((hidden on HireMe|see posting|telegram[^)]*)\)$', re.I)
 
 
@@ -30,7 +46,8 @@ def line(j):
     head = f'<b>{company}</b>: {title}' if company else title
     if loc:
         head += f' ({loc})'
-    return f'{head}\n{html.escape(url)}'
+    cv = pick_cv(str(j.get('title') or ''))
+    return f'{head}\nCV: {cv}\n{html.escape(url)}'
 
 
 path = sys.argv[1]
