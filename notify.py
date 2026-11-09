@@ -12,20 +12,38 @@ TECH = re.compile(
     r'\bAI\b|machine|\bML\b|vision|python|C\+\+|devops|cloud|R&D|firmware|analyst|quant|'
     r'תוכנה|פיתוח|אלגורית|סייבר|דאטה|מפתח|ראייה|ממוחשבת|למידת|בינה|מחקר|אבטחת',
     re.I)
-# Which of the five CVs to send, picked from the title. First match wins, backend is the default.
-CV_RULES = [
-    ('security', re.compile(r'cyber|security|infosec|סייבר|אבטחת', re.I)),
-    ('cloud', re.compile(r'devops|cloud|infrastructure|\bSRE\b|platform', re.I)),
-    ('systems', re.compile(r'embedded|firmware|C\+\+|low.?level|kernel|GPU|FPGA|driver|simulation|systems|real.?time|סימולצי|משובצ', re.I)),
-    ('ai_data', re.compile(r'\bAI\b|machine|\bML\b|learning|data|vision|algorithm|research|quant|analyst|NLP|אלגורית|דאטה|למידת|בינה|ראייה|מחקר', re.I)),
-]
+# Which of the five CVs to send. Each CV has keywords, a title hit scores 3 and a hit in the posting text scores 1.
+# The highest score wins and backend is the default when nothing scores.
+CV_WORDS = {
+    'backend': r'backend|back-end|\bAPI\b|microservice|\bREST\b|\bJava\b|node\.?js|golang|database|django|flask|full ?stack|server|web',
+    'security': r'cyber|security|infosec|penetration|vulnerab|malware|threat|סייבר|אבטחת',
+    'cloud': r'devops|cloud|terraform|\bsre\b|infrastructure|observability',
+    'systems': r'embedded|firmware|c\+\+|\brtos\b|kernel|linux|driver|\bgpu\b|cuda|fpga|real.?time|simulation|low.?level|networking|packet|סימולצי|משובצ',
+    'ai_data': r'machine learning|deep learning|\bAI\b|\bML\b|\bLLM\b|\bNLP\b|computer vision|algorithm|neural|pytorch|tensorflow|data scien|data analy|analytics|\bSQL\b|pandas|quant|ראייה|למידת|בינה|דאטה',
+}
+CV_RX = {k: re.compile(v, re.I) for k, v in CV_WORDS.items()}
 
 
-def pick_cv(title):
-    for name, rx in CV_RULES:
-        if rx.search(title or ''):
-            return name
-    return 'backend'
+def pick_cv(title, text=''):
+    best, score = 'backend', 0
+    for name, rx in CV_RX.items():
+        sc = (2 if name == 'backend' and re.search(r'software (?:engineer|developer)|developer|full ?stack|backend', title or '', re.I) else 0) + 3 * len(set(m.lower() for m in rx.findall(title or ''))) + len(set(m.lower() for m in rx.findall(text or '')))
+        if sc > score:
+            best, score = name, sc
+    return best
+
+
+# Amit studies computer science. Roles that need an engineering degree he does not have are dropped when the text says so.
+CS_SIGNAL = re.compile(r'computer science|software engineering|computer engineering|information systems|\bCS\b|מדעי המחשב|הנדסת תוכנה|הנדסת מחשבים|מדמ"ח', re.I)
+NON_CS_DEGREE = re.compile(r'(?:enrolled|studying|student|degree|pursuing|B\.?Sc\.?|M\.?Sc\.?)[^.\n]{0,40}?(?:electrical|electronic|mechanical|chemical|biomedical|aerospace|aeronautical|materials)\s+engineering|הנדסת (?:חשמל|אלקטרוניקה|מכונות|כימיה|חומרים)', re.I)
+
+
+def wrong_degree(title, text):
+    if re.search(r'electrical|electronic|mechanical|chemical|biomedical|\bRF\b|analog|VLSI', title or '', re.I):
+        return True
+    if not text:
+        return False
+    return bool(NON_CS_DEGREE.search(text)) and not CS_SIGNAL.search(text)
 
 
 NOISE = re.compile(r'^\((hidden on HireMe|see posting|telegram[^)]*)\)$', re.I)
@@ -72,7 +90,7 @@ def line(j):
     head = f'<b>{company}</b>: {title}' if company else title
     if loc:
         head += f' ({loc})'
-    cv = pick_cv(str(j.get('title') or ''))
+    cv = pick_cv(str(j.get('title') or ''), j.get('_text', ''))
     note = f' (GPA {j["gpa_note"]} mentioned)' if j.get('gpa_note') else ''
     return f'{head}\nCV: {cv}{note}\n{html.escape(url)}'
 
@@ -83,7 +101,12 @@ total = len(cands)
 cands = [j for j in cands if TECH.search(str(j.get('title') or ''))]
 kept = []
 for j in cands:
-    g = gpa_floor(posting_text(j))
+    text = posting_text(j)
+    j['_text'] = text
+    if wrong_degree(str(j.get('title') or ''), text):
+        print('dropped, degree is not CS', j.get('company'), j.get('title'))
+        continue
+    g = gpa_floor(text)
     if g is not None and g >= 85:
         print('dropped, GPA', g, j.get('company'), j.get('title'))
         continue
