@@ -3,7 +3,7 @@ name: Job scan
 on:
   schedule:
     # every 2 hours from 05:17 to 17:17 UTC (about 07:00 to 20:00 in Israel), at minute 17 to avoid the busy top of the hour
-    - cron: '17 5-17/2 * * *'
+    - cron: '18 5-17/2 * * *'
   workflow_dispatch: {}
 
 # never run two scans at once, they share scan/seen.json
